@@ -1,0 +1,63 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "msvc-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": {
+        "JPEGVIEW_BUILD_APP": "ON",
+        "JPEGVIEW_BUILD_EXPLORER_TESTS": "ON"
+      },
+      "vendor": { "jetbrains.com/clion": { "toolchain": "Visual Studio" } }
+    },
+    {
+      "name": "msvc-x64-release",
+      "displayName": "JPEGView / MSVC x64 / Release",
+      "inherits": "msvc-base",
+      "binaryDir": "${sourceDir}/out/build/msvc-x64-release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "msvc-x64-relwithdebinfo",
+      "displayName": "JPEGView / MSVC x64 / RelWithDebInfo",
+      "inherits": "msvc-base",
+      "binaryDir": "${sourceDir}/out/build/msvc-x64-relwithdebinfo",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "msvc-x64-debug",
+      "displayName": "JPEGView / MSVC x64 / Debug",
+      "inherits": "msvc-base",
+      "binaryDir": "${sourceDir}/out/build/msvc-x64-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "mingw-explorer-tests",
+      "displayName": "Explorer module tests only / MinGW",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/mingw-explorer-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "JPEGVIEW_BUILD_APP": "OFF",
+        "JPEGVIEW_BUILD_EXPLORER_TESTS": "ON"
+      },
+      "vendor": { "jetbrains.com/clion": { "toolchain": "MinGW" } }
+    }
+  ],
+  "buildPresets": [
+    { "name": "msvc-x64-release", "configurePreset": "msvc-x64-release", "targets": ["JPEGView"] },
+    { "name": "msvc-x64-relwithdebinfo", "configurePreset": "msvc-x64-relwithdebinfo", "targets": ["JPEGView"] },
+    { "name": "msvc-x64-debug", "configurePreset": "msvc-x64-debug", "targets": ["JPEGView"] },
+    { "name": "mingw-explorer-tests", "configurePreset": "mingw-explorer-tests" }
+  ],
+  "testPresets": [
+    {
+      "name": "mingw-explorer-tests",
+      "configurePreset": "mingw-explorer-tests",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
