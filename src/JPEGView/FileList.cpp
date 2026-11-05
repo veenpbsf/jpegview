@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "ExplorerOrderPolicy.h"
 #include "FileList.h"
 #include "SettingsProvider.h"
 #include "Helpers.h"
@@ -334,6 +335,9 @@ bool CFileList::DeleteFile(LPCTSTR fileNameWithPath) const {
 }
 
 void CFileList::FileHasRenamed(LPCTSTR sOldFileName, LPCTSTR sNewFileName) {
+	for (auto& path : m_explorerOrder) {
+		if (_wcsicmp(path.c_str(), sOldFileName) == 0) path = sNewFileName;
+	}
 	if (_tcsicmp(sOldFileName, m_sInitialFile) == 0) {
 		m_sInitialFile = sNewFileName;
 	}
@@ -518,7 +522,9 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
 }
 
 void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
-	if (eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
+	bool hadExplorerOrder = HasExplorerOrder();
+	m_explorerOrder.clear(); // an explicit sort command overrides the snapshot
+	if (hadExplorerOrder || eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
 		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
 		CFileDesc::SetSorting(eSorting, sortAscending);
 		m_fileList.sort();
@@ -827,6 +833,30 @@ void CFileList::FindFiles() {
 	}
 
 	m_fileList.sort();
+	ApplyStoredExplorerOrder();
+}
+
+bool CFileList::ApplyExplorerOrder(const std::vector<std::wstring>& paths) {
+	if (m_bIsSlideShowList || m_fileList.empty() || paths.empty()) return false;
+	bool containsCurrent = false;
+	LPCTSTR current = Current();
+	if (!current) return false;
+	for (const auto& path : paths) {
+		if (_wcsicmp(path.c_str(), current) == 0) { containsCurrent = true; break; }
+	}
+	if (!containsCurrent) return false;
+	m_explorerOrder = paths;
+	ApplyStoredExplorerOrder();
+	// splice preserves m_iter and every other iterator pointing to an entry.
+	m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
+	m_iterCheckPoint = m_iter;
+	return true;
+}
+
+void CFileList::ApplyStoredExplorerOrder() {
+	if (m_explorerOrder.empty()) return;
+	ExplorerOrderPolicy::Reorder(m_fileList, m_explorerOrder,
+		[](const CFileDesc& file) { return std::wstring(static_cast<LPCTSTR>(file.GetName())); });
 }
 
 void CFileList::VerifyFiles() {

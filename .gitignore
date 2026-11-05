@@ -37,6 +37,11 @@ ipch/
 *.VC.db
 *.VC.VC.opendb
 
+# Local Explorer-order verification outputs
+/tests/bin/
+/tests/explorer-fixture/
+/tests/patch-check.index
+
 # CMake and local CLion build output
 /out/
 /cmake-build-*/

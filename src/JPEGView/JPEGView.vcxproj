@@ -311,6 +311,9 @@
     <ClCompile Include="FileExtensionsDlg.cpp" />
     <ClCompile Include="FileExtensionsRegistry.cpp" />
     <ClCompile Include="FileList.cpp" />
+    <ClCompile Include="ExplorerOrder.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="HashCompareLPCTSTR.cpp" />
     <ClCompile Include="HEIFWrapper.cpp" />
     <ClCompile Include="HelpDlg.cpp" />
@@ -402,6 +405,8 @@
     <ClInclude Include="FileExtensionsDlg.h" />
     <ClInclude Include="FileExtensionsRegistry.h" />
     <ClInclude Include="FileList.h" />
+    <ClInclude Include="ExplorerOrder.h" />
+    <ClInclude Include="ExplorerOrderPolicy.h" />
     <ClInclude Include="HashCompareLPCTSTR.h" />
     <ClInclude Include="HEIFWrapper.h" />
     <ClInclude Include="HelpDlg.h" />

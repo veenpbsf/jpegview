@@ -7,6 +7,7 @@
 #include "ProcessParams.h"
 #include "Helpers.h"
 #include "CropCtl.h"
+#include "ExplorerOrder.h"
 
 class CFileList;
 class CJPEGProvider;
@@ -134,7 +135,7 @@ public:
 
 	// Called by main()
 	void SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 
-		int nTransitionTime, bool bAutoExit, int nDisplayMonitor);
+		int nTransitionTime, bool bAutoExit, int nDisplayMonitor, HWND sourceExplorer = NULL);
 
 	// Called by the different controller classes
 	HWND GetHWND() { return m_hWnd; }
@@ -231,6 +232,12 @@ private:
 	CFileList* m_pFileList; // used for navigation
 	CDirectoryWatcher* m_pDirectoryWatcher; // notifies the main window when the current file changed or a file in the current directory was added or deleted
 	CJPEGProvider * m_pJPEGProvider; // reads image (of any format, not only JPEGs) files, using read ahead
+	CExplorerOrderSnapshot m_explorerOrder;
+	HWND m_hSourceExplorer = NULL;
+	bool m_bExplorerFirstPainted = false;
+	void BeginExplorerOrder(LPCTSTR fileName, HWND sourceExplorer);
+	void CancelExplorerOrder();
+	bool PollExplorerOrder(); // false while navigation must wait for the snapshot
 	CJPEGImage * m_pCurrentImage; // currently displayed image
 	bool m_bOutOfMemoryLastImage; // true if the last image could not be requested because not enough memory
 	bool m_bExceptionErrorLastImage; // true if the last image could not be requested because of an unhandled exception

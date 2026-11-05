@@ -179,6 +179,8 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS * pExceptionInfo)
 
 int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lpstrCmdLine, int /*nCmdShow*/)
 {
+	// Capture the originating Explorer before our own window can take focus.
+	HWND sourceExplorer = ::GetForegroundWindow();
 	HRESULT hRes = ::CoInitialize(NULL);
 
 #ifdef DEBUG
@@ -224,7 +226,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 			copyData.lpData = (LPVOID)(LPCTSTR)sStartupFile;
 			ULONG_PTR result = 0;
 			PDWORD_PTR resultPtr = &result;
-			LRESULT res = ::SendMessageTimeout(_HWNDOtherInstance, WM_COPYDATA, 0, (LPARAM)&copyData, 0, 250, resultPtr);
+			LRESULT res = ::SendMessageTimeout(_HWNDOtherInstance, WM_COPYDATA, (WPARAM)sourceExplorer, (LPARAM)&copyData, 0, 250, resultPtr);
 			bFileLoadedByExistingInstance = *resultPtr == (ULONG_PTR)KEY_MAGIC;
 		}
 	}
@@ -239,7 +241,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 
 		CMainDlg dlgMain(bForceFullScreen);
 
-		dlgMain.SetStartupInfo(sStartupFile, nAutostartSlideShow, eSorting, eTransitionEffect, nTransitionTime, bAutoExit, nDisplayMonitor);
+		dlgMain.SetStartupInfo(sStartupFile, nAutostartSlideShow, eSorting, eTransitionEffect, nTransitionTime, bAutoExit, nDisplayMonitor, sourceExplorer);
 
 		try {
 			nRet = (int)dlgMain.DoModal();

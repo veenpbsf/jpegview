@@ -1,0 +1,1178 @@
+diff --git a/.gitignore b/.gitignore
+index a7c53d2..2c8522f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -36,3 +36,8 @@ ipch/
+ *.cachefile
+ *.VC.db
+ *.VC.VC.opendb
++
++# Local Explorer-order verification outputs
++/tests/bin/
++/tests/explorer-fixture/
++/tests/patch-check.index
+diff --git a/README-ExplorerOrder.zh-CN.md b/README-ExplorerOrder.zh-CN.md
+new file mode 100644
+index 0000000..da04904
+--- /dev/null
++++ b/README-ExplorerOrder.zh-CN.md
+@@ -0,0 +1,125 @@
++# JPEGView：普通文件夹打开时读取资源管理器排序
++
++基于官方 `sylikc/jpegview` 的 `v1.3.46`，基线提交：
++`af075dbd1918554ea4491b42646f03286749a0e6`。
++
++本扩展按上游的 GPL-2.0-or-later 许可证提供，保留上游 LICENSE/COPYING 文件。
++
++## 本版实现的行为
++
++从 Windows 资源管理器的普通文件夹双击图片后：
++
++1. JPEGView 按原流程打开被双击的那张图。
++2. 后台线程读取来源文件夹当前视图中的文件顺序。
++3. 首张图片首次绘制以后，在界面线程中应用这份顺序；保持当前图片不变。
++4. 上一张、下一张、Home、End 随后使用这份顺序。
++5. 读取失败、来源不符或查询未在约 2 秒预算内完成时，使用原来的 `FileDisplayOrder`。
++
++**只读取一次。** 在资源管理器里重新排序，不会实时改变已打开的 JPEGView。
++重新从资源管理器打开图片会建立新快照，包括交给已有单实例窗口打开的情况。
++
++查询尚未完成时，翻页操作暂不执行，避免按临时顺序跳错；无需阻塞界面等待。
++完成很快的查询可在首图绘制后立即使用；若首张大图解码超过 2 秒，及时完成的快照仍会保留。
++
++本机独立探针测试的 3 张图文件夹读取耗时约 31–32 ms；这不是重新编译后的完整看图程序启动耗时。
++
++## 设置
++
++新增 INI 选项，默认开启；旧 INI 没有此项也会使用默认值：
++
++```ini
++FollowExplorerOrder=true
++```
++
++设为 `false` 可关闭扩展，完全按原来的排序规则浏览。
++在 JPEGView 中主动选择排序方式／升降序，会退出本次快照排序。
++显式命令行 `/order` 或自动播放 `/slideshow` 的新进程启动保持原命令行为，不启用本扩展。
++
++## 范围与边界
++
++- 支持实际文件系统中的普通文件夹；只接受来源 Explorer 窗口、实际文件夹路径和被打开图片相符的结果。
++- 搜索结果、库、主页、桌面、压缩包视图及其他虚拟文件夹不在本版范围内。
++- 文件对话框、命令行直接启动、拖入 JPEGView 的文件使用原排序；不猜测其他已打开文件夹的顺序。
++- Windows 11 有限度检查活动视图的可见性，但不承诺复杂多标签页／同目录多视图组合；本次没有做这些场景的兼容验证。
++- 沿用上游的常规路径限制，超过 `MAX_PATH` 的路径回退，不宣称增加长路径支持。
++- 删除文件／目录刷新会保留已有快照相对顺序；新增文件排在快照条目之后，使用原排序的相对顺序。
++- Shell COM 调用不在界面线程执行。超时后界面放弃结果，不强制终止线程；同一进程最多允许两个读取工作线程，避免异常 Shell 服务导致无限累积。
++
++## 源码结构
++
++- `src/JPEGView/ExplorerOrder.cpp/.h`：独立 STA 线程，读取来源 Explorer 视图，使用 `SVGIO_FLAG_VIEWORDER` 枚举真实显示顺序。
++- `src/JPEGView/ExplorerOrderPolicy.h`：按快照重排现有链表节点，保持当前图片的迭代器和对象地址。
++- `src/JPEGView/FileList.cpp/.h`：应用快照、刷新后保留快照、显式排序时退出快照。
++- `src/JPEGView/JPEGView.cpp`：在获得焦点前记录来源窗口；复用已有实例时转发来源窗口。
++- `src/JPEGView/MainDlg.cpp/.h`：首次绘制后的定时轮询、在界面线程应用、取消过期任务和导航保护。
++- `src/JPEGView/SettingsProvider.cpp/.h`、`Config/JPEGView.ini*`：开关。
++
++扩展只改文件列表和启动接线，没有修改图片解码／缩放／绘制算法。
++
++## 完整程序的编译
++
++本补丁接入上游当前的 `src/JPEGView.sln` / `JPEGView.vcxproj`。
++未接入旧 VS2010/2013/2017 工程，也不支持 XP 构建。
++
++按上游 `COMPILING.txt`，推荐 VS2019 Community/Professional，安装：
++
++- 使用 C++ 的桌面开发工具；
++- MSVC v142 x86/x64 工具链；
++- 对应 C++ ATL 组件；
++- Windows 10 SDK。
++
++打开 `src/JPEGView.sln`，选择 `Release | x64`，生成 `JPEGView` 及其依赖 `WICLoader`。
++输出目录为 `src/JPEGView/bin/x64/Release/`。
++只构建看图程序不需要构建 `JPEGView.Setup`；WiX 只用于 MSI 安装包。
++
++如果使用 VS2022，安装相应 C++/ATL/SDK，并安装 v142 兼容工具链，或自行将工程切换为已安装的工具集。
++本次没有验证切换工具集后的完整构建。
++
++源码 ZIP 已包含所需 WTL 与 QOI 子模块内容；补丁本身应用到全新 Git 克隆时，先运行：
++
++```powershell
++git checkout v1.3.46
++git submodule update --init deps/WTL-sf extras/third_party/qoi
++git apply --check ..\JPEGView-1.3.46-explorer-order.patch
++git apply ..\JPEGView-1.3.46-explorer-order.patch
++```
++
++## 已执行的验证（2026-10-30）
++
++1. **新增原生模块编译通过**：使用本机 CLion 随附的 MinGW GCC 15.2，C++17、`-Wall -Wextra -Werror`。
++2. **实际重排代码测试通过**：任意视图顺序、当前节点保留、前后导航位置、Home/End、中文／空格路径、大小写、重复项、删除项、新增项和空列表。
++3. **真实 Explorer 集成探针通过**：独立文件夹中按大小升序、按名称降序，都返回预期顺序；还验证了后台完成后延迟 2200 ms 消费仍有效。结果见 `tests/explorer-smoke-result.json`。
++4. 工程与筛选 XML 解析、源码补丁空白检查通过；补丁还会对干净基线执行适用性检查。
++
++**未完成的验证：** 完整 JPEGView 程序的编译和端到端双击／翻图测试。
++本机 Visual Studio 缺少 C++ 构建工具，MSBuild 报缺少 `Microsoft.Cpp.Default.props`，因此没有生成或替换 JPEGView.exe。
++新增模块的编译通过不等于整个应用已经编译通过。
++
++### 用 MinGW 重跑原生模块测试
++
++在仓库根目录执行，并将 MinGW `bin` 放入当前终端 PATH：
++
++```powershell
++New-Item -ItemType Directory -Path tests\bin -Force | Out-Null
++g++ -std=c++17 -O2 -Wall -Wextra -Werror tests\ExplorerOrderTests.cpp src\JPEGView\ExplorerOrder.cpp -o tests\bin\ExplorerOrderTests.exe -lole32 -loleaut32 -lshell32 -luuid -lshlwapi
++.\tests\bin\ExplorerOrderTests.exe
++```
++
++重跑真实 Explorer 检查：
++
++```powershell
++.\tests\SmokeExplorer.ps1 -Compiler '你的 MinGW\bin\g++.exe'
++```
++
++该脚本只在 `tests/explorer-fixture` 创建测试 BMP，并打开、排序、关闭这个专用 Explorer 窗口；不会改默认打开方式或用户图片。
++
++### 完整构建后的手动验收
++
++1. 在普通文件夹放入三张图片，让名称顺序与大小顺序不同。
++2. 在资源管理器按大小升序排列，双击中间一张。
++3. 验证先显示被双击图片，左右／Home／End 与资源管理器顺序一致。
++4. 在资源管理器改变排序，验证已经打开的看图会话保持旧顺序。
++5. 重新双击图片，验证新会话使用新顺序；同时测试单实例复用。
++6. 设置 `FollowExplorerOrder=false`，验证恢复原排序。
++7. 在 JPEGView 中手动选择原排序，验证能退出快照。
++8. 验证关闭、删除、重命名和目录刷新；最后以同图、同目录对照原版的首图启动速度。
+diff --git a/src/JPEGView/Config/JPEGView.ini b/src/JPEGView/Config/JPEGView.ini
+index 679ae25..30791bf 100644
+--- a/src/JPEGView/Config/JPEGView.ini
++++ b/src/JPEGView/Config/JPEGView.ini
+@@ -219,6 +219,10 @@ FileDisplayOrder=LastModDate
+ ; Sort files ascending (increasing, e.g. A->Z, 0->9) or descending (decreasing, e.g. Z->A, 9->0)
+ FileSortAscending=true
+ 
++; Capture the opening Explorer folder's displayed order once (Windows 7+).
++; Falls back to FileDisplayOrder if unavailable. Does not track later re-sorting.
++FollowExplorerOrder=true
++
+ ; Navigation within or between folders
+ ; LoopFolder : Loop within the source folder and never leave this folder
+ ; LoopSameFolderLevel: Loop to next folder on the same hierarchy level (sibling folders)
+diff --git a/src/JPEGView/Config/JPEGView.ini.tpl b/src/JPEGView/Config/JPEGView.ini.tpl
+index 73a6e3e..79f807a 100644
+--- a/src/JPEGView/Config/JPEGView.ini.tpl
++++ b/src/JPEGView/Config/JPEGView.ini.tpl
+@@ -191,6 +191,10 @@ FileDisplayOrder=LastModDate
+ ; Sort files ascending (increasing, e.g. A->Z, 0->9) or descending (decreasing, e.g. Z->A, 9->0)
+ FileSortAscending=true
+ 
++; Capture the opening Explorer folder's displayed order once (Windows 7+).
++; Falls back to FileDisplayOrder if unavailable. Does not track later re-sorting.
++FollowExplorerOrder=true
++
+ ; Navigation within or between folders
+ ; LoopFolder : Loop within the source folder and never leave this folder
+ ; LoopSameFolderLevel: Loop to next folder on the same hierarchy level (sibling folders)
+diff --git a/src/JPEGView/ExplorerOrder.cpp b/src/JPEGView/ExplorerOrder.cpp
+new file mode 100644
+index 0000000..d183404
+--- /dev/null
++++ b/src/JPEGView/ExplorerOrder.cpp
+@@ -0,0 +1,272 @@
++// JPEGView Explorer-order extension. GPL-2.0-or-later, like JPEGView.
++// This translation unit intentionally does not use the XP-targeting PCH.
++#define WINVER 0x0601
++#define _WIN32_WINNT 0x0601
++#define NOMINMAX
++#include "ExplorerOrder.h"
++#include <shlobj.h>
++#include <exdisp.h>
++#include <shlguid.h>
++#include <shlwapi.h>
++#include <servprov.h>
++#include <atomic>
++#include <thread>
++#include <utility>
++#ifdef JPEGVIEW_EXPLORER_ORDER_DIAGNOSTICS
++#include <iostream>
++#define EXPLORER_TRACE(value) (std::wcerr << L"[ExplorerOrder] " << value << L'\n')
++#else
++#define EXPLORER_TRACE(value) ((void)0)
++#endif
++
++#ifdef _MSC_VER
++#pragma comment(lib, "ole32.lib")
++#pragma comment(lib, "oleaut32.lib")
++#pragma comment(lib, "shell32.lib")
++#pragma comment(lib, "uuid.lib")
++#pragma comment(lib, "shlwapi.lib")
++#endif
++
++namespace {
++	const DWORD QueryBudgetMs = 2000;
++	const size_t MaxViewItems = 100000;
++	std::atomic<unsigned> ActiveReaders{0};
++	struct ReleaseReaderSlot {
++		~ReleaseReaderSlot() { ActiveReaders.fetch_sub(1, std::memory_order_relaxed); }
++	};
++
++	template<class T> class ComPtr {
++	public:
++		ComPtr() : p(nullptr) {}
++		~ComPtr() { if (p) p->Release(); }
++		ComPtr(const ComPtr&) = delete;
++		ComPtr& operator=(const ComPtr&) = delete;
++		T* operator->() const { return p; }
++		explicit operator bool() const { return p != nullptr; }
++		T** Put() { return &p; } // only use once, on an empty pointer
++		void** PutVoid() { return reinterpret_cast<void**>(&p); }
++	private:
++		T* p;
++	};
++
++	struct FreeTaskMemory {
++		void operator()(ITEMIDLIST* p) const { CoTaskMemFree(p); }
++	};
++	using Pidl = std::unique_ptr<ITEMIDLIST, FreeTaskMemory>;
++
++	bool SamePath(const std::wstring& a, const std::wstring& b) {
++		return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
++	}
++
++	std::wstring NormalizePath(const std::wstring& path) {
++		// The upstream viewer uses MAX_PATH buffers in several places. Do not
++		// pretend this extension adds extended-length or virtual-path support.
++		if (path.empty() || path.size() >= MAX_PATH) return {};
++		wchar_t full[MAX_PATH];
++		DWORD length = GetFullPathNameW(path.c_str(), MAX_PATH, full, nullptr);
++		if (!length || length >= MAX_PATH) return {};
++		std::wstring result(full, length);
++		for (auto& c : result) if (c == L'/') c = L'\\';
++		while (result.size() > 3 && result.back() == L'\\') result.pop_back();
++		return result;
++	}
++
++	std::wstring ParentPath(const std::wstring& path) {
++		auto slash = path.find_last_of(L'\\');
++		if (slash == std::wstring::npos) return {};
++		return path.substr(0, slash == 2 && path[1] == L':' ? 3 : slash);
++	}
++
++	bool IsExplorerWindow(HWND window) {
++		if (!window || !IsWindow(window)) return false;
++		wchar_t name[64] = {};
++		GetClassNameW(window, name, 64);
++		return wcscmp(name, L"CabinetWClass") == 0 || wcscmp(name, L"ExploreWClass") == 0;
++	}
++
++	bool IsActiveView(HWND view, HWND root) {
++		// Inspect the tab/view hierarchy, not the root window's visibility. The
++		// originating Explorer may have been minimized/hidden after launching us.
++		for (HWND child = view; child && child != root; child = GetParent(child)) {
++			if (!(GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE)) return false;
++		}
++		return view && GetAncestor(view, GA_ROOT) == root;
++	}
++
++	bool GetItemPath(IShellFolder* folder, PCUITEMID_CHILD item, std::wstring& path) {
++		SFGAOF attributes = SFGAO_FILESYSTEM | SFGAO_FOLDER;
++		if (FAILED(folder->GetAttributesOf(1, &item, &attributes)) ||
++			!(attributes & SFGAO_FILESYSTEM) || (attributes & SFGAO_FOLDER)) return false;
++		STRRET name = {};
++		if (FAILED(folder->GetDisplayNameOf(item, SHGDN_FORPARSING, &name))) return false;
++		PWSTR text = nullptr;
++		if (FAILED(StrRetToStrW(&name, item, &text))) return false;
++		path = NormalizePath(text ? text : L"");
++		CoTaskMemFree(text);
++		return !path.empty();
++	}
++}
++
++struct CExplorerOrderSnapshot::State {
++	std::wstring image;
++	std::wstring folder;
++	HWND sourceWindow;
++	DWORD started;
++	std::atomic<bool> cancelled{false};
++	std::atomic<Status> status{Pending};
++	std::vector<std::wstring> paths;
++
++	bool Expired() const {
++		return cancelled.load(std::memory_order_relaxed) ||
++			static_cast<DWORD>(GetTickCount() - started) >= QueryBudgetMs;
++	}
++};
++
++CExplorerOrderSnapshot::~CExplorerOrderSnapshot() { Cancel(); }
++
++void CExplorerOrderSnapshot::Cancel() {
++	if (m_state) m_state->cancelled.store(true, std::memory_order_relaxed);
++	m_state.reset(); // never joins a worker stuck inside an Explorer COM call
++}
++
++bool CExplorerOrderSnapshot::Start(const std::wstring& imagePath, HWND sourceWindow) {
++	Cancel();
++	HWND root = sourceWindow ? GetAncestor(sourceWindow, GA_ROOT) : nullptr;
++	if (!IsExplorerWindow(root)) return false;
++	const auto image = NormalizePath(imagePath);
++	const auto folder = ParentPath(image);
++	DWORD attributes = image.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(image.c_str());
++	if (folder.empty() || attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
++	try {
++		auto state = std::make_shared<State>();
++		state->image = image;
++		state->folder = folder;
++		state->sourceWindow = root;
++		state->started = GetTickCount();
++		// A stuck out-of-process COM server cannot accumulate unbounded workers
++		// if many images are opened in the same viewer process.
++		unsigned active = ActiveReaders.load(std::memory_order_relaxed);
++		while (active < 2 && !ActiveReaders.compare_exchange_weak(active, active + 1)) {}
++		if (active >= 2) return false;
++		try {
++			std::thread worker([state]() {
++				ReleaseReaderSlot release;
++				Read(state);
++			});
++			worker.detach();
++		} catch (...) {
++			ActiveReaders.fetch_sub(1, std::memory_order_relaxed);
++			return false;
++		}
++		m_state = std::move(state);
++		return true;
++	} catch (...) {
++		return false; // failure to create a thread must not stop image viewing
++	}
++}
++
++CExplorerOrderSnapshot::Status CExplorerOrderSnapshot::Poll(std::vector<std::wstring>& paths) {
++	if (!m_state) return Unavailable;
++	Status status = m_state->status.load(std::memory_order_acquire);
++	if (status == Pending) {
++		if (m_state->Expired()) { Cancel(); return Unavailable; }
++		return Pending;
++	}
++	// A timely completed snapshot stays valid even if decoding/painting the
++	// initial image kept the UI busy for longer than the query budget.
++	if (status == Ready) paths.swap(m_state->paths);
++	m_state.reset();
++	return status;
++}
++
++void CExplorerOrderSnapshot::Read(const std::shared_ptr<State>& state) {
++	EXPLORER_TRACE(L"worker started, source=" << state->sourceWindow);
++	HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
++	if (FAILED(initialized)) {
++		state->status.store(Unavailable, std::memory_order_release);
++		return;
++	}
++	bool success = false;
++	try {
++		// Keep every COM pointer inside this scope, releasing it before CoUninitialize.
++		ComPtr<IShellWindows> windows;
++		HRESULT created = CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
++			IID_IShellWindows, windows.PutVoid());
++		EXPLORER_TRACE(L"ShellWindows HRESULT=" << std::hex << created << std::dec);
++		if (SUCCEEDED(created)) {
++			long count = 0;
++			if (SUCCEEDED(windows->get_Count(&count))) {
++				EXPLORER_TRACE(L"windows=" << count);
++				for (long i = 0; i < count && !state->Expired() && !success; ++i) {
++					VARIANT index;
++					VariantInit(&index);
++					index.vt = VT_I4;
++					index.lVal = i;
++					ComPtr<IDispatch> dispatch;
++					if (FAILED(windows->Item(index, dispatch.Put())) || !dispatch) continue;
++					ComPtr<IWebBrowser2> web;
++					if (FAILED(dispatch->QueryInterface(IID_IWebBrowser2, web.PutVoid()))) continue;
++					SHANDLE_PTR window = 0;
++					HRESULT windowResult = web->get_HWND(&window);
++					EXPLORER_TRACE(L"candidate=" << reinterpret_cast<HWND>(window));
++					if (FAILED(windowResult) || GetAncestor(reinterpret_cast<HWND>(window), GA_ROOT) != state->sourceWindow) continue;
++					ComPtr<IServiceProvider> services;
++					if (FAILED(dispatch->QueryInterface(IID_IServiceProvider, services.PutVoid()))) continue;
++					ComPtr<IShellBrowser> browser;
++					HRESULT browserResult = services->QueryService(SID_STopLevelBrowser, IID_IShellBrowser, browser.PutVoid());
++					EXPLORER_TRACE(L"browser HRESULT=" << std::hex << browserResult << std::dec);
++					if (FAILED(browserResult)) continue;
++					ComPtr<IShellView> view;
++					if (FAILED(browser->QueryActiveShellView(view.Put()))) continue;
++					HWND viewWindow = nullptr;
++					HRESULT viewResult = view->GetWindow(&viewWindow);
++					EXPLORER_TRACE(L"view=" << viewWindow << L" visible=" << IsWindowVisible(viewWindow));
++					if (FAILED(viewResult) || !IsActiveView(viewWindow, state->sourceWindow)) continue;
++					ComPtr<IFolderView> folderView;
++					if (FAILED(view->QueryInterface(IID_IFolderView, folderView.PutVoid()))) continue;
++					ComPtr<IPersistFolder2> persisted;
++					if (FAILED(folderView->GetFolder(IID_IPersistFolder2, persisted.PutVoid()))) continue;
++					PIDLIST_ABSOLUTE rawFolder = nullptr;
++					if (FAILED(persisted->GetCurFolder(&rawFolder)) || !rawFolder) continue;
++					Pidl folderId(rawFolder);
++					wchar_t folderPath[MAX_PATH] = {};
++					BOOL pathResult = SHGetPathFromIDListW(folderId.get(), folderPath);
++					EXPLORER_TRACE(L"folder=" << folderPath << L" expected=" << state->folder);
++					if (!pathResult ||
++						!SamePath(NormalizePath(folderPath), state->folder)) continue; // excludes search/library views
++					ComPtr<IShellFolder> folder;
++					if (FAILED(folderView->GetFolder(IID_IShellFolder, folder.PutVoid()))) continue;
++					ComPtr<IEnumIDList> items;
++					HRESULT itemsResult = folderView->Items(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER,
++						IID_IEnumIDList, items.PutVoid());
++					EXPLORER_TRACE(L"items HRESULT=" << std::hex << itemsResult << std::dec);
++					if (FAILED(itemsResult)) continue;
++					std::vector<std::wstring> paths;
++					bool foundImage = false;
++					bool complete = false;
++					while (!state->Expired() && paths.size() < MaxViewItems) {
++						PITEMID_CHILD rawItem = nullptr;
++						HRESULT next = items->Next(1, &rawItem, nullptr);
++						Pidl item(rawItem);
++						if (next == S_FALSE) { complete = true; break; }
++						if (next != S_OK || !rawItem) break;
++						std::wstring path;
++						if (!GetItemPath(folder.operator->(), item.get(), path) ||
++							!SamePath(ParentPath(path), state->folder)) continue;
++						foundImage = foundImage || SamePath(path, state->image);
++						paths.push_back(std::move(path));
++					}
++					// Never publish a partial enumeration as the supposedly complete order.
++					EXPLORER_TRACE(L"paths=" << paths.size() << L" complete=" << complete << L" found=" << foundImage << L" expired=" << state->Expired());
++					if (complete && foundImage && !state->Expired()) {
++						state->paths.swap(paths);
++						success = true;
++					}
++				}
++			}
++		}
++	} catch (...) { success = false; }
++	CoUninitialize();
++	EXPLORER_TRACE(L"worker finished, success=" << success << L" elapsed=" << static_cast<DWORD>(GetTickCount() - state->started));
++	state->status.store(success ? Ready : Unavailable, std::memory_order_release);
++}
+diff --git a/src/JPEGView/ExplorerOrder.h b/src/JPEGView/ExplorerOrder.h
+new file mode 100644
+index 0000000..8c5463a
+--- /dev/null
++++ b/src/JPEGView/ExplorerOrder.h
+@@ -0,0 +1,28 @@
++#pragma once
++
++#include <windows.h>
++#include <memory>
++#include <string>
++#include <vector>
++
++// Reads a one-time snapshot on a private COM STA. No Shell COM call runs on the
++// UI thread, and the worker never keeps a dialog/window-object pointer.
++class CExplorerOrderSnapshot {
++public:
++	enum Status { Pending, Ready, Unavailable };
++	CExplorerOrderSnapshot() = default;
++	~CExplorerOrderSnapshot();
++	CExplorerOrderSnapshot(const CExplorerOrderSnapshot&) = delete;
++	CExplorerOrderSnapshot& operator=(const CExplorerOrderSnapshot&) = delete;
++
++	// sourceWindow must be captured before JPEGView takes foreground focus.
++	bool Start(const std::wstring& imagePath, HWND sourceWindow);
++	Status Poll(std::vector<std::wstring>& paths);
++	bool IsPending() const { return m_state != nullptr; }
++	void Cancel();
++
++private:
++	struct State;
++	std::shared_ptr<State> m_state;
++	static void Read(const std::shared_ptr<State>& state);
++};
+diff --git a/src/JPEGView/ExplorerOrderPolicy.h b/src/JPEGView/ExplorerOrderPolicy.h
+new file mode 100644
+index 0000000..43a5ded
+--- /dev/null
++++ b/src/JPEGView/ExplorerOrderPolicy.h
+@@ -0,0 +1,33 @@
++#pragma once
++#include <cwchar>
++#include <list>
++#include <map>
++#include <string>
++#include <vector>
++
++namespace ExplorerOrderPolicy {
++	struct PathLess {
++		bool operator()(const std::wstring& a, const std::wstring& b) const {
++			// Match CFileList::FindFile's case-insensitive CRT path semantics.
++			return _wcsicmp(a.c_str(), b.c_str()) < 0;
++		}
++	};
++
++	// Move existing nodes, never reconstruct file descriptors or invalidate their
++	// iterators. Items absent from the opening snapshot remain at the end, in
++	// their existing order (e.g. newly created files on a later directory reload).
++	template<class Entry, class GetPath>
++	void Reorder(std::list<Entry>& files, const std::vector<std::wstring>& snapshot, GetPath getPath) {
++		std::map<std::wstring, typename std::list<Entry>::iterator, PathLess> index;
++		for (auto i = files.begin(); i != files.end(); ++i) index.emplace(getPath(*i), i);
++		std::list<Entry> ordered;
++		for (const auto& path : snapshot) {
++			auto found = index.find(path);
++			if (found == index.end()) continue;
++			ordered.splice(ordered.end(), files, found->second);
++			index.erase(found); // duplicate entries in a Shell result are harmless
++		}
++		ordered.splice(ordered.end(), files);
++		files.swap(ordered);
++	}
++}
+diff --git a/src/JPEGView/FileList.cpp b/src/JPEGView/FileList.cpp
+index 7539bba..08b2a63 100644
+--- a/src/JPEGView/FileList.cpp
++++ b/src/JPEGView/FileList.cpp
+@@ -1,4 +1,5 @@
+ #include "StdAfx.h"
++#include "ExplorerOrderPolicy.h"
+ #include "FileList.h"
+ #include "SettingsProvider.h"
+ #include "Helpers.h"
+@@ -335,6 +336,9 @@ bool CFileList::DeleteFile(LPCTSTR fileNameWithPath) const {
+ }
+ 
+ void CFileList::FileHasRenamed(LPCTSTR sOldFileName, LPCTSTR sNewFileName) {
++	for (auto& path : m_explorerOrder) {
++		if (_wcsicmp(path.c_str(), sOldFileName) == 0) path = sNewFileName;
++	}
+ 	if (_tcsicmp(sOldFileName, m_sInitialFile) == 0) {
+ 		m_sInitialFile = sNewFileName;
+ 	}
+@@ -519,7 +523,9 @@ LPCTSTR CFileList::PeekNextPrev(int nIndex, bool bForward, bool bToggle) {
+ }
+ 
+ void CFileList::SetSorting(Helpers::ESorting eSorting, bool sortAscending) {
+-	if (eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
++	bool hadExplorerOrder = HasExplorerOrder();
++	m_explorerOrder.clear(); // an explicit sort command overrides the snapshot
++	if (hadExplorerOrder || eSorting != CFileDesc::GetSorting() || sortAscending != CFileDesc::IsSortedAscending()) {
+ 		CString sThisFile = (m_iter != m_fileList.end()) ? m_iter->GetName() : "";
+ 		CFileDesc::SetSorting(eSorting, sortAscending);
+ 		m_fileList.sort();
+@@ -828,6 +834,30 @@ void CFileList::FindFiles() {
+ 	}
+ 
+ 	m_fileList.sort();
++	ApplyStoredExplorerOrder();
++}
++
++bool CFileList::ApplyExplorerOrder(const std::vector<std::wstring>& paths) {
++	if (m_bIsSlideShowList || m_fileList.empty() || paths.empty()) return false;
++	bool containsCurrent = false;
++	LPCTSTR current = Current();
++	if (!current) return false;
++	for (const auto& path : paths) {
++		if (_wcsicmp(path.c_str(), current) == 0) { containsCurrent = true; break; }
++	}
++	if (!containsCurrent) return false;
++	m_explorerOrder = paths;
++	ApplyStoredExplorerOrder();
++	// splice preserves m_iter and every other iterator pointing to an entry.
++	m_iterStart = m_bWrapAroundFolder ? m_iter : m_fileList.begin();
++	m_iterCheckPoint = m_iter;
++	return true;
++}
++
++void CFileList::ApplyStoredExplorerOrder() {
++	if (m_explorerOrder.empty()) return;
++	ExplorerOrderPolicy::Reorder(m_fileList, m_explorerOrder,
++		[](const CFileDesc& file) { return std::wstring(static_cast<LPCTSTR>(file.GetName())); });
+ }
+ 
+ void CFileList::VerifyFiles() {
+diff --git a/src/JPEGView/FileList.h b/src/JPEGView/FileList.h
+index 50f8e6c..22cc1e9 100644
+--- a/src/JPEGView/FileList.h
++++ b/src/JPEGView/FileList.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include "Helpers.h"
++#include <string>
++#include <vector>
+ 
+ class CDirectoryWatcher;
+ 
+@@ -69,6 +71,11 @@ public:
+ 	// Reload file list for given file, if NULL for current file
+ 	void Reload(LPCTSTR sFileName = NULL, bool clearForwardHistory = true);
+ 
++	// UI-thread only. Takes a one-time order snapshot without changing the
++	// current image or the user's configured fallback sort criteria.
++	bool ApplyExplorerOrder(const std::vector<std::wstring>& paths);
++	bool HasExplorerOrder() const { return !m_explorerOrder.empty(); }
++
+ 	// Tells the file list that a file has been renamed externally
+ 	void FileHasRenamed(LPCTSTR sOldFileName, LPCTSTR sNewFileName);
+ 
+@@ -154,6 +161,7 @@ private:
+ 	int m_nLevel;
+ 	CString m_sInitialFile;
+ 	CString m_sDirectory;
++	std::vector<std::wstring> m_explorerOrder;
+ 	// filelists for several folders are chained
+ 	CFileList* m_next;
+ 	CFileList* m_prev;
+@@ -178,6 +186,7 @@ private:
+ 	CFileList* WrapToNextImage();
+ 	CFileList* WrapToPrevImage();
+ 	void FindFiles();
++	void ApplyStoredExplorerOrder();
+ 	void VerifyFiles();
+ 	bool IsImageFile(const CString & sEnding);
+ 	bool TryReadingSlideShowList(const CString & sSlideShowFile);
+diff --git a/src/JPEGView/JPEGView.cpp b/src/JPEGView/JPEGView.cpp
+index 977fabb..e8e2bb7 100644
+--- a/src/JPEGView/JPEGView.cpp
++++ b/src/JPEGView/JPEGView.cpp
+@@ -179,6 +179,8 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS * pExceptionInfo)
+ 
+ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lpstrCmdLine, int /*nCmdShow*/)
+ {
++	// Capture the originating Explorer before our own window can take focus.
++	HWND sourceExplorer = ::GetForegroundWindow();
+ 	HRESULT hRes = ::CoInitialize(NULL);
+ 
+ #ifdef DEBUG
+@@ -225,7 +227,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
+ 			copyData.lpData = (LPVOID)(LPCTSTR)sStartupFile;
+ 			ULONG_PTR result = 0;
+ 			PDWORD_PTR resultPtr = &result;
+-			LRESULT res = ::SendMessageTimeout(_HWNDOtherInstance, WM_COPYDATA, 0, (LPARAM)&copyData, 0, 250, resultPtr);
++			LRESULT res = ::SendMessageTimeout(_HWNDOtherInstance, WM_COPYDATA, (WPARAM)sourceExplorer, (LPARAM)&copyData, 0, 250, resultPtr);
+ 			bFileLoadedByExistingInstance = *resultPtr == (ULONG_PTR)KEY_MAGIC;
+ 		}
+ 	}
+@@ -240,7 +242,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
+ 
+ 		CMainDlg dlgMain(bForceFullScreen);
+ 
+-		dlgMain.SetStartupInfo(sStartupFile, nAutostartSlideShow, eSorting, eTransitionEffect, nTransitionTime, bAutoExit, nDisplayMonitor);
++		dlgMain.SetStartupInfo(sStartupFile, nAutostartSlideShow, eSorting, eTransitionEffect, nTransitionTime, bAutoExit, nDisplayMonitor, sourceExplorer);
+ 
+ 		try {
+ 			nRet = (int)dlgMain.DoModal();
+diff --git a/src/JPEGView/JPEGView.vcxproj b/src/JPEGView/JPEGView.vcxproj
+index 6801186..d6d486e 100644
+--- a/src/JPEGView/JPEGView.vcxproj
++++ b/src/JPEGView/JPEGView.vcxproj
+@@ -311,6 +311,9 @@
+     <ClCompile Include="FileExtensionsDlg.cpp" />
+     <ClCompile Include="FileExtensionsRegistry.cpp" />
+     <ClCompile Include="FileList.cpp" />
++    <ClCompile Include="ExplorerOrder.cpp">
++      <PrecompiledHeader>NotUsing</PrecompiledHeader>
++    </ClCompile>
+     <ClCompile Include="HashCompareLPCTSTR.cpp" />
+     <ClCompile Include="HEIFWrapper.cpp" />
+     <ClCompile Include="HelpDlg.cpp" />
+@@ -402,6 +405,8 @@
+     <ClInclude Include="FileExtensionsDlg.h" />
+     <ClInclude Include="FileExtensionsRegistry.h" />
+     <ClInclude Include="FileList.h" />
++    <ClInclude Include="ExplorerOrder.h" />
++    <ClInclude Include="ExplorerOrderPolicy.h" />
+     <ClInclude Include="HashCompareLPCTSTR.h" />
+     <ClInclude Include="HEIFWrapper.h" />
+     <ClInclude Include="HelpDlg.h" />
+@@ -490,4 +495,4 @@
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+   <ImportGroup Label="ExtensionTargets">
+   </ImportGroup>
+-</Project>
+\ No newline at end of file
++</Project>
+diff --git a/src/JPEGView/JPEGView.vcxproj.filters b/src/JPEGView/JPEGView.vcxproj.filters
+index 8a484a5..f2a980e 100644
+--- a/src/JPEGView/JPEGView.vcxproj.filters
++++ b/src/JPEGView/JPEGView.vcxproj.filters
+@@ -54,6 +54,9 @@
+     <ClCompile Include="FileList.cpp">
+       <Filter>Source Files</Filter>
+     </ClCompile>
++    <ClCompile Include="ExplorerOrder.cpp">
++      <Filter>Source Files</Filter>
++    </ClCompile>
+     <ClCompile Include="Helpers.cpp">
+       <Filter>Source Files</Filter>
+     </ClCompile>
+@@ -308,6 +311,12 @@
+     <ClInclude Include="FileList.h">
+       <Filter>Header Files</Filter>
+     </ClInclude>
++    <ClInclude Include="ExplorerOrder.h">
++      <Filter>Header Files</Filter>
++    </ClInclude>
++    <ClInclude Include="ExplorerOrderPolicy.h">
++      <Filter>Header Files</Filter>
++    </ClInclude>
+     <ClInclude Include="Helpers.h">
+       <Filter>Header Files</Filter>
+     </ClInclude>
+@@ -574,4 +583,4 @@
+       <Filter>Resource Files</Filter>
+     </ResourceCompile>
+   </ItemGroup>
+-</Project>
+\ No newline at end of file
++</Project>
+diff --git a/src/JPEGView/MainDlg.cpp b/src/JPEGView/MainDlg.cpp
+index a4318cd..1d1c219 100644
+--- a/src/JPEGView/MainDlg.cpp
++++ b/src/JPEGView/MainDlg.cpp
+@@ -286,6 +286,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
+ }
+ 
+ CMainDlg::~CMainDlg() {
++	m_explorerOrder.Cancel();
+ 	delete m_pDirectoryWatcher;
+ 	delete m_pFileList;
+ 	if (m_pJPEGProvider != NULL) delete m_pJPEGProvider;
+@@ -298,7 +299,8 @@ CMainDlg::~CMainDlg() {
+ }
+ 
+ void CMainDlg::SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 
+-	int nTransitionTime, bool bAutoExit, int nDisplayMonitor) { 
++	int nTransitionTime, bool bAutoExit, int nDisplayMonitor, HWND sourceExplorer) {
++	m_hSourceExplorer = sourceExplorer;
+ 	m_sStartupFile = sStartupFile; m_nAutoStartSlideShow = nAutostartSlideShow; m_eForcedSorting = eSorting;
+ 	m_bAutoExit = bAutoExit;
+ 	if ((int)eEffect >= 0) m_eTransitionEffect = eEffect;
+@@ -378,6 +380,9 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
+ 		(m_eForcedSorting == Helpers::FS_Undefined) ? sp.Sorting() : m_eForcedSorting, sp.IsSortedAscending(), sp.WrapAroundFolder(),
+ 		0, m_eForcedSorting != Helpers::FS_Undefined);
+ 	m_pFileList->SetNavigationMode(sp.Navigation());
++	if (m_eForcedSorting == Helpers::FS_Undefined && m_nAutoStartSlideShow == 0)
++		BeginExplorerOrder(m_sStartupFile, m_hSourceExplorer);
++	m_hSourceExplorer = NULL;
+ 
+ 	// create thread pool for processing requests on multiple CPU cores
+ 	CProcessingThreadPool::This().CreateThreadPoolThreads();
+@@ -579,10 +584,45 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
+ 	m_pPanelMgr->OnPostPaint(dc);
+ 
+ 	SetCursorForMoveSection();
++	m_bExplorerFirstPainted = true;
+ 
+ 	return 0;
+ }
+ 
++void CMainDlg::CancelExplorerOrder() {
++	::KillTimer(m_hWnd, EXPLORER_ORDER_TIMER_EVENT_ID);
++	m_explorerOrder.Cancel();
++}
++
++void CMainDlg::BeginExplorerOrder(LPCTSTR fileName, HWND sourceExplorer) {
++	CancelExplorerOrder();
++	m_bExplorerFirstPainted = false;
++	if (!fileName || !CSettingsProvider::This().FollowExplorerOrder() ||
++		!m_pFileList || m_pFileList->IsSlideShowList()) return;
++	if (m_explorerOrder.Start(fileName, sourceExplorer)) {
++		if (!::SetTimer(m_hWnd, EXPLORER_ORDER_TIMER_EVENT_ID, 30, NULL))
++			m_explorerOrder.Cancel();
++	}
++}
++
++bool CMainDlg::PollExplorerOrder() {
++	if (!m_explorerOrder.IsPending()) return true;
++	// Do not reorder the list or free read-ahead buffers until the initial paint.
++	if (!m_bExplorerFirstPainted) return false;
++	std::vector<std::wstring> paths;
++	CExplorerOrderSnapshot::Status result = m_explorerOrder.Poll(paths);
++	if (result == CExplorerOrderSnapshot::Pending) return false;
++	::KillTimer(m_hWnd, EXPLORER_ORDER_TIMER_EVENT_ID);
++	if (result == CExplorerOrderSnapshot::Ready && m_pFileList &&
++		m_pFileList->ApplyExplorerOrder(paths)) {
++		// Never ClearAllRequests(): that would invalidate the displayed image.
++		if (m_pJPEGProvider) m_pJPEGProvider->FreeAllPossibleMemory();
++		UpdateWindowTitle();
++		Invalidate(FALSE);
++	}
++	return true;
++}
++
+ void CMainDlg::PaintToDC(CDC& dc) {
+ 	COLORREF backColor = CSettingsProvider::This().ColorBackground();
+ 	if (backColor == 0)
+@@ -711,12 +751,13 @@ LRESULT CMainDlg::OnGetMinMaxInfo(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPara
+ 	}
+ }
+ 
+-LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
++LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM wParam, LPARAM lParam, BOOL& bHandled) {
+ 	bHandled = FALSE;
+ 	COPYDATASTRUCT* pData = (COPYDATASTRUCT*)lParam;
+ 	if (pData != NULL && pData->dwData == KEY_MAGIC && pData->cbData > 0 && 
+ 		((m_bFullScreenMode && CSettingsProvider::This().SingleFullScreenInstance()) || CSettingsProvider::This().SingleInstance())) {
+ 		m_sStartupFile = CString((LPCTSTR)pData->lpData, pData->cbData / sizeof(TCHAR) - 1);
++		m_hSourceExplorer = reinterpret_cast<HWND>(wParam);
+ 		::PostMessage(m_hWnd, WM_LOAD_FILE_ASYNCH, 0, KEY_MAGIC);
+ 		bHandled = TRUE;
+ 		return KEY_MAGIC;
+@@ -742,6 +783,7 @@ LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPar
+ }
+ 
+ LRESULT CMainDlg::OnClose(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
++	CancelExplorerOrder();
+ 	GetWindowRect(m_windowRectOnClose);
+ 	bHandled = FALSE;
+ 	return 0;
+@@ -1062,6 +1104,10 @@ LRESULT CMainDlg::OnDropFiles(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, B
+ }
+ 
+ LRESULT CMainDlg::OnTimer(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
++	if (wParam == EXPLORER_ORDER_TIMER_EVENT_ID) {
++		PollExplorerOrder();
++		return 0;
++	}
+ 	if (wParam == ANIMATION_TIMER_EVENT_ID || (wParam == SLIDESHOW_TIMER_EVENT_ID && m_nCurrentTimeout > 0)) {
+ 		// Remove all timer messages for slideshow and animation events that accumulated in the queue
+ 		MSG msg;
+@@ -1148,7 +1194,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
+ 	HMENU hMenuNavigation = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_NAVIGATION);
+ 	::CheckMenuItem(hMenuNavigation,  m_pFileList->GetNavigationMode()*10 + IDM_LOOP_FOLDER, MF_CHECKED);
+ 	HMENU hMenuOrdering = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_DISPLAY_ORDER);
+-	::CheckMenuItem(hMenuOrdering,  
++	if (!m_pFileList->HasExplorerOrder()) ::CheckMenuItem(hMenuOrdering,
+ 		(m_pFileList->GetSorting() == Helpers::FS_LastModTime) ? IDM_SORT_MOD_DATE :
+ 		(m_pFileList->GetSorting() == Helpers::FS_CreationTime) ? IDM_SORT_CREATION_DATE :
+ 		(m_pFileList->GetSorting() == Helpers::FS_FileName) ? IDM_SORT_NAME :
+@@ -1477,6 +1523,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
+ 		case IDM_SORT_NAME:
+ 		case IDM_SORT_RANDOM:
+ 		case IDM_SORT_SIZE:
++			CancelExplorerOrder();
+ 			m_pFileList->SetSorting(
+ 				(nCommand == IDM_SORT_CREATION_DATE) ? Helpers::FS_CreationTime : 
+ 				(nCommand == IDM_SORT_MOD_DATE) ? Helpers::FS_LastModTime : 
+@@ -1488,6 +1535,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
+ 			break;
+ 		case IDM_SORT_ASCENDING:
+ 		case IDM_SORT_DESCENDING:
++			CancelExplorerOrder();
+ 			m_pFileList->SetSorting(m_pFileList->GetSorting(), nCommand == IDM_SORT_ASCENDING);
+ 			if (m_pEXIFDisplayCtl->IsActive() || m_bShowFileName) {
+ 				this->Invalidate(FALSE);
+@@ -2148,6 +2196,7 @@ bool CMainDlg::OpenFileWithDialog(bool bFullScreen, bool bAfterStartup) {
+ }
+ 
+ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
++	CancelExplorerOrder();
+ 	StopMovieMode();
+ 	StopAnimation();
+ 	// recreate file list based on image opened
+@@ -2156,6 +2205,8 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
+ 	delete m_pFileList;
+ 	m_sStartupFile = sFileName;
+ 	m_pFileList = new CFileList(m_sStartupFile, *m_pDirectoryWatcher, eOldSorting, oOldAscending, CSettingsProvider::This().WrapAroundFolder());
++	BeginExplorerOrder(m_sStartupFile, m_hSourceExplorer);
++	m_hSourceExplorer = NULL;
+ 	// free current image and all read ahead images
+ 	InitParametersForNewImage();
+ 	m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
+@@ -2410,6 +2461,10 @@ void CMainDlg::GotoImage(EImagePosition ePos) {
+ }
+ 
+ void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
++	// An early key press must not navigate using the temporary fallback order.
++	// No wait/pumping loop: the UI and first image remain responsive.
++	if (ePos != POS_Current && ePos != POS_Clipboard && ePos != POS_NextAnimation &&
++		!PollExplorerOrder()) return;
+ 	// Timer handling for slideshows
+ 	if (ePos == POS_Next || ePos == POS_NextSlideShow) {
+ 		if (m_nCurrentTimeout > 0) {
+@@ -3464,6 +3519,7 @@ void CMainDlg::AnimateTransition() {
+ }
+ 
+ void CMainDlg::CleanupAndTerminate() {
++	CancelExplorerOrder();
+ 	StopMovieMode();
+ 	StopAnimation();
+ 	delete m_pJPEGProvider; // delete this early to properly shut down the loading threads
+diff --git a/src/JPEGView/MainDlg.h b/src/JPEGView/MainDlg.h
+index f7c629e..76b9aef 100644
+--- a/src/JPEGView/MainDlg.h
++++ b/src/JPEGView/MainDlg.h
+@@ -7,6 +7,7 @@
+ #include "ProcessParams.h"
+ #include "Helpers.h"
+ #include "CropCtl.h"
++#include "ExplorerOrder.h"
+ 
+ class CFileList;
+ class CJPEGProvider;
+@@ -134,7 +135,7 @@ public:
+ 
+ 	// Called by main()
+ 	void SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 
+-		int nTransitionTime, bool bAutoExit, int nDisplayMonitor);
++		int nTransitionTime, bool bAutoExit, int nDisplayMonitor, HWND sourceExplorer = NULL);
+ 
+ 	// Called by the different controller classes
+ 	HWND GetHWND() { return m_hWnd; }
+@@ -231,6 +232,12 @@ private:
+ 	CFileList* m_pFileList; // used for navigation
+ 	CDirectoryWatcher* m_pDirectoryWatcher; // notifies the main window when the current file changed or a file in the current directory was added or deleted
+ 	CJPEGProvider * m_pJPEGProvider; // reads image (of any format, not only JPEGs) files, using read ahead
++	CExplorerOrderSnapshot m_explorerOrder;
++	HWND m_hSourceExplorer = NULL;
++	bool m_bExplorerFirstPainted = false;
++	void BeginExplorerOrder(LPCTSTR fileName, HWND sourceExplorer);
++	void CancelExplorerOrder();
++	bool PollExplorerOrder(); // false while navigation must wait for the snapshot
+ 	CJPEGImage * m_pCurrentImage; // currently displayed image
+ 	bool m_bOutOfMemoryLastImage; // true if the last image could not be requested because not enough memory
+ 	bool m_bExceptionErrorLastImage; // true if the last image could not be requested because of an unhandled exception
+diff --git a/src/JPEGView/SettingsProvider.cpp b/src/JPEGView/SettingsProvider.cpp
+index 3ba2950..3bbf125 100644
+--- a/src/JPEGView/SettingsProvider.cpp
++++ b/src/JPEGView/SettingsProvider.cpp
+@@ -418,6 +418,7 @@ void CSettingsProvider::ReadWriteableINISettings() {
+ 	else {
+ 		m_eNavigation = Helpers::NM_LoopDirectory;
+ 	}
++	m_bFollowExplorerOrder = GetBool(_T("FollowExplorerOrder"), true);
+ 	CString sSorting = GetString(_T("FileDisplayOrder"), _T("LastModDate"));
+ 	if (sSorting.CompareNoCase(_T("CreationDate")) == 0) {
+ 		m_eSorting = Helpers::FS_CreationTime;
+diff --git a/src/JPEGView/SettingsProvider.h b/src/JPEGView/SettingsProvider.h
+index bce046c..2423df2 100644
+--- a/src/JPEGView/SettingsProvider.h
++++ b/src/JPEGView/SettingsProvider.h
+@@ -49,6 +49,7 @@ public:
+ 	int NumberOfCoresToUse() { return m_nNumCores; }
+ 	EFilterType DownsamplingFilter() { return m_eDownsamplingFilter; }
+ 	Helpers::ESorting Sorting() { return m_eSorting; }
++	bool FollowExplorerOrder() { return m_bFollowExplorerOrder; }
+ 	bool IsSortedAscending() { return m_bIsSortedAscending; }
+ 	Helpers::ENavigationMode Navigation() { return m_eNavigation; }
+ 	bool NavigateWithMouseWheel() { return m_bNavigateMouseWheel; }
+@@ -221,6 +222,7 @@ private:
+ 	int m_nNumCores;
+ 	EFilterType m_eDownsamplingFilter;
+ 	Helpers::ESorting m_eSorting;
++	bool m_bFollowExplorerOrder;
+ 	bool m_bIsSortedAscending;
+ 	Helpers::ENavigationMode m_eNavigation;
+ 	bool m_bNavigateMouseWheel;
+diff --git a/src/JPEGView/TimerEventIDs.h b/src/JPEGView/TimerEventIDs.h
+index 0b095b7..c612f25 100644
+--- a/src/JPEGView/TimerEventIDs.h
++++ b/src/JPEGView/TimerEventIDs.h
+@@ -8,4 +8,5 @@
+ #define NAVPANEL_ANI_TIMER_EVENT_ID 6 // animation timer for navigation panel
+ #define NAVPANEL_START_ANI_TIMER_EVENT_ID 7 // animation start timer for navigation panel
+ #define IPPANEL_TIMER_EVENT_ID 8 // to show image processing panel in window mode
+-#define ANIMATION_TIMER_EVENT_ID 9 // GIF animation timer ID
+\ No newline at end of file
++#define ANIMATION_TIMER_EVENT_ID 9 // GIF animation timer ID
++#define EXPLORER_ORDER_TIMER_EVENT_ID 10 // poll the opening folder's order snapshot
+diff --git a/tests/ExplorerOrderProbe.cpp b/tests/ExplorerOrderProbe.cpp
+new file mode 100644
+index 0000000..d3ea0cf
+--- /dev/null
++++ b/tests/ExplorerOrderProbe.cpp
+@@ -0,0 +1,26 @@
++#define WINVER 0x0601
++#define _WIN32_WINNT 0x0601
++#define NOMINMAX
++#include "../src/JPEGView/ExplorerOrder.h"
++#include <iostream>
++#include <cstdlib>
++
++// Read-only probe. The optional HWND lets an integration test target its own
++// Explorer window; normal usage captures the current foreground window.
++int wmain(int argc, wchar_t** argv) {
++	if (argc < 2) {
++		std::wcerr << L"Usage: ExplorerOrderProbe.exe <image-path> [Explorer-HWND-decimal] [delay-poll-ms]\n";
++		return 2;
++	}
++	HWND source = argc > 2 ? reinterpret_cast<HWND>(static_cast<ULONG_PTR>(_wcstoui64(argv[2], nullptr, 10))) : GetForegroundWindow();
++	CExplorerOrderSnapshot query;
++	if (!query.Start(argv[1], source)) { std::cout << "UNAVAILABLE:start\n"; return 3; }
++	if (argc > 3) Sleep(static_cast<DWORD>(_wtoi(argv[3])));
++	std::vector<std::wstring> paths;
++	CExplorerOrderSnapshot::Status status;
++	do { status = query.Poll(paths); if (status == CExplorerOrderSnapshot::Pending) Sleep(10); }
++	while (status == CExplorerOrderSnapshot::Pending);
++	if (status != CExplorerOrderSnapshot::Ready) { std::cout << "UNAVAILABLE\n"; return 3; }
++	for (const auto& path : paths) std::wcout << path << '\n';
++	return 0;
++}
+diff --git a/tests/ExplorerOrderTests.cpp b/tests/ExplorerOrderTests.cpp
+new file mode 100644
+index 0000000..1674bc2
+--- /dev/null
++++ b/tests/ExplorerOrderTests.cpp
+@@ -0,0 +1,74 @@
++#define WINVER 0x0601
++#define _WIN32_WINNT 0x0601
++#define NOMINMAX
++#include "../src/JPEGView/ExplorerOrderPolicy.h"
++#include "../src/JPEGView/ExplorerOrder.h"
++#include <iostream>
++#include <stdexcept>
++#include <utility>
++
++namespace {
++	struct Entry {
++		std::wstring path;
++		explicit Entry(std::wstring value) : path(std::move(value)) {}
++		Entry(const Entry&) = delete; // the production descriptors must not be copied
++		Entry& operator=(const Entry&) = delete;
++	};
++	void Require(bool condition, const char* message) {
++		if (!condition) throw std::runtime_error(message);
++	}
++	std::vector<std::wstring> Paths(const std::list<Entry>& entries) {
++		std::vector<std::wstring> result;
++		for (const auto& entry : entries) result.push_back(entry.path);
++		return result;
++	}
++	void Reorder(std::list<Entry>& entries, const std::vector<std::wstring>& snapshot) {
++		ExplorerOrderPolicy::Reorder(entries, snapshot, [](const Entry& e) { return e.path; });
++	}
++}
++
++int main() {
++	try {
++		// Arbitrary view order, selected image in the middle, stable node identity.
++		std::list<Entry> files;
++		files.emplace_back(L"C:\\photos\\a.jpg");
++		files.emplace_back(L"C:\\photos\\b.jpg");
++		files.emplace_back(L"C:\\photos\\c.jpg");
++		auto selected = std::next(files.begin());
++		Entry* selectedAddress = &*selected;
++		Reorder(files, {L"C:\\photos\\c.jpg", L"C:\\photos\\b.jpg", L"C:\\photos\\a.jpg"});
++		Require(Paths(files) == std::vector<std::wstring>{L"C:\\photos\\c.jpg", L"C:\\photos\\b.jpg", L"C:\\photos\\a.jpg"}, "view order");
++		Require(&*selected == selectedAddress && selected->path == L"C:\\photos\\b.jpg", "selected image/iterator survived");
++		Require(std::prev(selected)->path == L"C:\\photos\\c.jpg" && std::next(selected)->path == L"C:\\photos\\a.jpg", "previous and next");
++		Require(files.front().path == L"C:\\photos\\c.jpg" && files.back().path == L"C:\\photos\\a.jpg", "home and end");
++
++		// Duplicate paths, missing/deleted entries, Unicode and path casing.
++		std::list<Entry> unicode;
++		unicode.emplace_back(L"C:\\Pictures\\\u732b 2.PNG");
++		unicode.emplace_back(L"C:\\Pictures\\\u732b 1.PNG");
++		unicode.emplace_back(L"C:\\Pictures\\new-A.PNG");
++		unicode.emplace_back(L"C:\\Pictures\\new-B.PNG");
++		Reorder(unicode, {L"c:\\pictures\\\u732b 1.png", L"C:\\Pictures\\deleted.PNG",
++			L"C:\\Pictures\\\u732b 1.PNG", L"c:\\pictures\\\u732b 2.png"});
++		Require(Paths(unicode) == std::vector<std::wstring>{L"C:\\Pictures\\\u732b 1.PNG", L"C:\\Pictures\\\u732b 2.PNG", L"C:\\Pictures\\new-A.PNG", L"C:\\Pictures\\new-B.PNG"}, "case/Unicode/duplicates/deletions/additions");
++		auto unchanged = Paths(unicode);
++		Reorder(unicode, {});
++		Require(Paths(unicode) == unchanged, "empty snapshot preserves fallback");
++		std::list<Entry> empty;
++		Reorder(empty, {L"C:\\missing.jpg"});
++		Require(empty.empty(), "empty folder");
++
++		CExplorerOrderSnapshot query;
++		std::vector<std::wstring> output;
++		Require(!query.Start(L"C:\\missing.jpg", nullptr), "missing origin falls back");
++		Require(!query.Start(L"C:\\missing.jpg", GetDesktopWindow()), "desktop excluded");
++		Require(query.Poll(output) == CExplorerOrderSnapshot::Unavailable, "no query pending");
++		query.Cancel();
++		query.Cancel();
++		std::cout << "PASS: view order, selected node, previous/next, home/end, Unicode, case, duplicates, deleted/new files, empty lists and no-origin fallback.\n";
++		return 0;
++	} catch (const std::exception& error) {
++		std::cerr << "FAIL: " << error.what() << '\n';
++		return 1;
++	}
++}
+diff --git a/tests/SmokeExplorer.ps1 b/tests/SmokeExplorer.ps1
+new file mode 100644
+index 0000000..0b78f7a
+--- /dev/null
++++ b/tests/SmokeExplorer.ps1
+@@ -0,0 +1,56 @@
++param([string]$Compiler = 'D:\soft\CLion 2026.2.4\bin\mingw\bin\g++.exe')
++$ErrorActionPreference = 'Stop'
++$repoRoot = Split-Path $PSScriptRoot -Parent
++$binDir = Join-Path $PSScriptRoot 'bin'
++$fixtureDir = Join-Path $PSScriptRoot 'explorer-fixture'
++New-Item -ItemType Directory -Path $binDir,$fixtureDir -Force | Out-Null
++$env:PATH = (Split-Path $Compiler -Parent) + ';' + $env:PATH
++& $Compiler -std=c++17 -O2 -Wall -Wextra -Werror -DJPEGVIEW_EXPLORER_ORDER_DIAGNOSTICS -municode (Join-Path $PSScriptRoot 'ExplorerOrderProbe.cpp') (Join-Path $repoRoot 'src\JPEGView\ExplorerOrder.cpp') -o (Join-Path $binDir 'ExplorerOrderProbe.exe') -lole32 -loleaut32 -lshell32 -luuid -lshlwapi
++if ($LASTEXITCODE -ne 0) { throw 'Probe compilation failed.' }
++Add-Type -AssemblyName System.Drawing
++foreach ($spec in @(@('a-large.bmp',96),@('b-small.bmp',32),@('c-medium.bmp',64))) {
++    $bitmap = New-Object Drawing.Bitmap ([int]$spec[1]),([int]$spec[1])
++    try { $bitmap.Save((Join-Path $fixtureDir $spec[0]),[Drawing.Imaging.ImageFormat]::Bmp) }
++    finally { $bitmap.Dispose() }
++}
++$shell = New-Object -ComObject Shell.Application
++$existing = @($shell.Windows() | Where-Object { try { $_.Document.Folder.Self.Path -eq $fixtureDir } catch { $false } })
++if ($existing.Count) { throw 'Test folder is already open; close that test-folder window first.' }
++$window = $null
++$opened = $false
++$results = @()
++try {
++    Start-Process -FilePath "$env:WINDIR\explorer.exe" -ArgumentList @('/n,',('"'+$fixtureDir+'"')) -WindowStyle Hidden
++    $opened = $true
++    $deadline = [DateTime]::UtcNow.AddSeconds(12)
++    do {
++        $window = $shell.Windows() | Where-Object { try { $_.Document.Folder.Self.Path -eq $fixtureDir } catch { $false } } | Select-Object -First 1
++        if (!$window) { Start-Sleep -Milliseconds 100 }
++    } while (!$window -and [DateTime]::UtcNow -lt $deadline)
++    if (!$window) { throw 'Could not locate the isolated Explorer test folder.' }
++    $image = Join-Path $fixtureDir 'c-medium.bmp'
++    foreach ($case in @(
++        @{Name='size-ascending'; Sort='prop:+System.Size;'; Expected=@('b-small.bmp','c-medium.bmp','a-large.bmp')},
++        @{Name='name-descending'; Sort='prop:-System.ItemNameDisplay;'; Expected=@('c-medium.bmp','b-small.bmp','a-large.bmp')}
++    )) {
++        $window.Document.SortColumns = $case.Sort
++        Start-Sleep -Milliseconds 400
++        # Second case also verifies consumption after a slow first-image paint:
++        # a snapshot completed within budget must remain usable after 2 seconds.
++        $delayPoll = if ($case.Name -eq 'name-descending') { '2200' } else { '0' }
++        $lines = @(& (Join-Path $binDir 'ExplorerOrderProbe.exe') $image ([string]$window.HWND) $delayPoll)
++        if ($LASTEXITCODE -ne 0) { throw "Snapshot failed for $($case.Name): $lines" }
++        $actual = @($lines | ForEach-Object { Split-Path ([string]$_) -Leaf })
++        if (($actual -join '|') -ne ($case.Expected -join '|')) {
++            throw "Wrong order for $($case.Name) [Shell=$($window.Document.SortColumns)]: $($actual -join ', ')"
++        }
++        $results += [PSCustomObject]@{Case=$case.Name; Result='PASS'; Order=$actual; ShellSortColumns=[string]$window.Document.SortColumns; PollDelayMs=[int]$delayPoll}
++    }
++    $results | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'explorer-smoke-result.json') -Encoding UTF8
++    $results | ConvertTo-Json -Depth 5
++} finally {
++    # Close only the window opened by this test and still showing our fixture.
++    if ($opened -and $window) {
++        try { if ($window.Document.Folder.Self.Path -eq $fixtureDir) { $window.Quit() } } catch { }
++    }
++}
+diff --git a/tests/explorer-smoke-result.json b/tests/explorer-smoke-result.json
+new file mode 100644
+index 0000000..06055a1
+--- /dev/null
++++ b/tests/explorer-smoke-result.json
+@@ -0,0 +1,24 @@
++[
++  {
++    "Case": "size-ascending",
++    "Result": "PASS",
++    "Order": [
++      "b-small.bmp",
++      "c-medium.bmp",
++      "a-large.bmp"
++    ],
++    "ShellSortColumns": "prop:System.Size;",
++    "PollDelayMs": 0
++  },
++  {
++    "Case": "name-descending",
++    "Result": "PASS",
++    "Order": [
++      "c-medium.bmp",
++      "b-small.bmp",
++      "a-large.bmp"
++    ],
++    "ShellSortColumns": "prop:-System.ItemNameDisplay;",
++    "PollDelayMs": 2200
++  }
++]

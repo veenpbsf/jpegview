@@ -1,0 +1,24 @@
+[
+  {
+    "Case": "size-ascending",
+    "Result": "PASS",
+    "Order": [
+      "b-small.bmp",
+      "c-medium.bmp",
+      "a-large.bmp"
+    ],
+    "ShellSortColumns": "prop:System.Size;",
+    "PollDelayMs": 0
+  },
+  {
+    "Case": "name-descending",
+    "Result": "PASS",
+    "Order": [
+      "c-medium.bmp",
+      "b-small.bmp",
+      "a-large.bmp"
+    ],
+    "ShellSortColumns": "prop:-System.ItemNameDisplay;",
+    "PollDelayMs": 2200
+  }
+]

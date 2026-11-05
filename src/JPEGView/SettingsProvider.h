@@ -49,6 +49,7 @@ public:
 	int NumberOfCoresToUse() { return m_nNumCores; }
 	EFilterType DownsamplingFilter() { return m_eDownsamplingFilter; }
 	Helpers::ESorting Sorting() { return m_eSorting; }
+	bool FollowExplorerOrder() { return m_bFollowExplorerOrder; }
 	bool IsSortedAscending() { return m_bIsSortedAscending; }
 	Helpers::ENavigationMode Navigation() { return m_eNavigation; }
 	bool NavigateWithMouseWheel() { return m_bNavigateMouseWheel; }
@@ -221,6 +222,7 @@ private:
 	int m_nNumCores;
 	EFilterType m_eDownsamplingFilter;
 	Helpers::ESorting m_eSorting;
+	bool m_bFollowExplorerOrder;
 	bool m_bIsSortedAscending;
 	Helpers::ENavigationMode m_eNavigation;
 	bool m_bNavigateMouseWheel;

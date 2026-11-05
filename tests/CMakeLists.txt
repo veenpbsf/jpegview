@@ -1,0 +1,21 @@
+add_executable(ExplorerOrderTests ExplorerOrderTests.cpp)
+target_link_libraries(ExplorerOrderTests PRIVATE ExplorerOrder)
+add_test(NAME ExplorerOrderPolicy COMMAND ExplorerOrderTests)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ExplorerOrderProbe.cpp")
+    add_executable(ExplorerOrderProbe ExplorerOrderProbe.cpp)
+    target_link_libraries(ExplorerOrderProbe PRIVATE ExplorerOrder)
+    if(MINGW)
+        target_link_options(ExplorerOrderProbe PRIVATE -municode)
+    endif()
+endif()
+
+if(MSVC)
+    target_compile_options(ExplorerOrderTests PRIVATE /W3)
+elseif(MINGW)
+    target_compile_options(ExplorerOrder PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(ExplorerOrderTests PRIVATE -Wall -Wextra -Werror)
+    get_filename_component(_compiler_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set_tests_properties(ExplorerOrderPolicy PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_compiler_bin}")
+endif()

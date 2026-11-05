@@ -418,6 +418,7 @@ void CSettingsProvider::ReadWriteableINISettings() {
 	else {
 		m_eNavigation = Helpers::NM_LoopDirectory;
 	}
+	m_bFollowExplorerOrder = GetBool(_T("FollowExplorerOrder"), true);
 	CString sSorting = GetString(_T("FileDisplayOrder"), _T("LastModDate"));
 	if (sSorting.CompareNoCase(_T("CreationDate")) == 0) {
 		m_eSorting = Helpers::FS_CreationTime;

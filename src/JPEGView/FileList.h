@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Helpers.h"
+#include <string>
+#include <vector>
 
 class CDirectoryWatcher;
 
@@ -68,6 +70,11 @@ public:
 
 	// Reload file list for given file, if NULL for current file
 	void Reload(LPCTSTR sFileName = NULL, bool clearForwardHistory = true);
+
+	// UI-thread only. Takes a one-time order snapshot without changing the
+	// current image or the user's configured fallback sort criteria.
+	bool ApplyExplorerOrder(const std::vector<std::wstring>& paths);
+	bool HasExplorerOrder() const { return !m_explorerOrder.empty(); }
 
 	// Tells the file list that a file has been renamed externally
 	void FileHasRenamed(LPCTSTR sOldFileName, LPCTSTR sNewFileName);
@@ -154,6 +161,7 @@ private:
 	int m_nLevel;
 	CString m_sInitialFile;
 	CString m_sDirectory;
+	std::vector<std::wstring> m_explorerOrder;
 	// filelists for several folders are chained
 	CFileList* m_next;
 	CFileList* m_prev;
@@ -178,6 +186,7 @@ private:
 	CFileList* WrapToNextImage();
 	CFileList* WrapToPrevImage();
 	void FindFiles();
+	void ApplyStoredExplorerOrder();
 	void VerifyFiles();
 	bool IsImageFile(const CString & sEnding);
 	bool TryReadingSlideShowList(const CString & sSlideShowFile);

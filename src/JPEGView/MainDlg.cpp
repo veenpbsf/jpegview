@@ -286,6 +286,7 @@ CMainDlg::CMainDlg(bool bForceFullScreen) {
 }
 
 CMainDlg::~CMainDlg() {
+	m_explorerOrder.Cancel();
 	delete m_pDirectoryWatcher;
 	delete m_pFileList;
 	if (m_pJPEGProvider != NULL) delete m_pJPEGProvider;
@@ -298,7 +299,8 @@ CMainDlg::~CMainDlg() {
 }
 
 void CMainDlg::SetStartupInfo(LPCTSTR sStartupFile, int nAutostartSlideShow, Helpers::ESorting eSorting, Helpers::ETransitionEffect eEffect, 
-	int nTransitionTime, bool bAutoExit, int nDisplayMonitor) { 
+	int nTransitionTime, bool bAutoExit, int nDisplayMonitor, HWND sourceExplorer) {
+	m_hSourceExplorer = sourceExplorer;
 	m_sStartupFile = sStartupFile; m_nAutoStartSlideShow = nAutostartSlideShow; m_eForcedSorting = eSorting;
 	m_bAutoExit = bAutoExit;
 	if ((int)eEffect >= 0) m_eTransitionEffect = eEffect;
@@ -378,6 +380,9 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 		(m_eForcedSorting == Helpers::FS_Undefined) ? sp.Sorting() : m_eForcedSorting, sp.IsSortedAscending(), sp.WrapAroundFolder(),
 		0, m_eForcedSorting != Helpers::FS_Undefined);
 	m_pFileList->SetNavigationMode(sp.Navigation());
+	if (m_eForcedSorting == Helpers::FS_Undefined && m_nAutoStartSlideShow == 0)
+		BeginExplorerOrder(m_sStartupFile, m_hSourceExplorer);
+	m_hSourceExplorer = NULL;
 
 	// create thread pool for processing requests on multiple CPU cores
 	CProcessingThreadPool::This().CreateThreadPoolThreads();
@@ -579,8 +584,43 @@ LRESULT CMainDlg::OnPaint(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, B
 	m_pPanelMgr->OnPostPaint(dc);
 
 	SetCursorForMoveSection();
+	m_bExplorerFirstPainted = true;
 
 	return 0;
+}
+
+void CMainDlg::CancelExplorerOrder() {
+	::KillTimer(m_hWnd, EXPLORER_ORDER_TIMER_EVENT_ID);
+	m_explorerOrder.Cancel();
+}
+
+void CMainDlg::BeginExplorerOrder(LPCTSTR fileName, HWND sourceExplorer) {
+	CancelExplorerOrder();
+	m_bExplorerFirstPainted = false;
+	if (!fileName || !CSettingsProvider::This().FollowExplorerOrder() ||
+		!m_pFileList || m_pFileList->IsSlideShowList()) return;
+	if (m_explorerOrder.Start(fileName, sourceExplorer)) {
+		if (!::SetTimer(m_hWnd, EXPLORER_ORDER_TIMER_EVENT_ID, 30, NULL))
+			m_explorerOrder.Cancel();
+	}
+}
+
+bool CMainDlg::PollExplorerOrder() {
+	if (!m_explorerOrder.IsPending()) return true;
+	// Do not reorder the list or free read-ahead buffers until the initial paint.
+	if (!m_bExplorerFirstPainted) return false;
+	std::vector<std::wstring> paths;
+	CExplorerOrderSnapshot::Status result = m_explorerOrder.Poll(paths);
+	if (result == CExplorerOrderSnapshot::Pending) return false;
+	::KillTimer(m_hWnd, EXPLORER_ORDER_TIMER_EVENT_ID);
+	if (result == CExplorerOrderSnapshot::Ready && m_pFileList &&
+		m_pFileList->ApplyExplorerOrder(paths)) {
+		// Never ClearAllRequests(): that would invalidate the displayed image.
+		if (m_pJPEGProvider) m_pJPEGProvider->FreeAllPossibleMemory();
+		UpdateWindowTitle();
+		Invalidate(FALSE);
+	}
+	return true;
 }
 
 void CMainDlg::PaintToDC(CDC& dc) {
@@ -710,12 +750,13 @@ LRESULT CMainDlg::OnGetMinMaxInfo(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPara
 	}
 }
 
-LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
+LRESULT CMainDlg::OnAnotherInstanceStarted(UINT /*uMsg*/, WPARAM wParam, LPARAM lParam, BOOL& bHandled) {
 	bHandled = FALSE;
 	COPYDATASTRUCT* pData = (COPYDATASTRUCT*)lParam;
 	if (pData != NULL && pData->dwData == KEY_MAGIC && pData->cbData > 0 && 
 		((m_bFullScreenMode && CSettingsProvider::This().SingleFullScreenInstance()) || CSettingsProvider::This().SingleInstance())) {
 		m_sStartupFile = CString((LPCTSTR)pData->lpData, pData->cbData / sizeof(TCHAR) - 1);
+		m_hSourceExplorer = reinterpret_cast<HWND>(wParam);
 		::PostMessage(m_hWnd, WM_LOAD_FILE_ASYNCH, 0, KEY_MAGIC);
 		bHandled = TRUE;
 		return KEY_MAGIC;
@@ -741,6 +782,7 @@ LRESULT CMainDlg::OnLoadFileAsynch(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lPar
 }
 
 LRESULT CMainDlg::OnClose(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled) {
+	CancelExplorerOrder();
 	GetWindowRect(m_windowRectOnClose);
 	bHandled = FALSE;
 	return 0;
@@ -1061,6 +1103,10 @@ LRESULT CMainDlg::OnDropFiles(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, B
 }
 
 LRESULT CMainDlg::OnTimer(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& /*bHandled*/) {
+	if (wParam == EXPLORER_ORDER_TIMER_EVENT_ID) {
+		PollExplorerOrder();
+		return 0;
+	}
 	if (wParam == ANIMATION_TIMER_EVENT_ID || (wParam == SLIDESHOW_TIMER_EVENT_ID && m_nCurrentTimeout > 0)) {
 		// Remove all timer messages for slideshow and animation events that accumulated in the queue
 		MSG msg;
@@ -1147,7 +1193,7 @@ LRESULT CMainDlg::OnContextMenu(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam,
 	HMENU hMenuNavigation = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_NAVIGATION);
 	::CheckMenuItem(hMenuNavigation,  m_pFileList->GetNavigationMode()*10 + IDM_LOOP_FOLDER, MF_CHECKED);
 	HMENU hMenuOrdering = ::GetSubMenu(hMenuTrackPopup, SUBMENU_POS_DISPLAY_ORDER);
-	::CheckMenuItem(hMenuOrdering,  
+	if (!m_pFileList->HasExplorerOrder()) ::CheckMenuItem(hMenuOrdering,
 		(m_pFileList->GetSorting() == Helpers::FS_LastModTime) ? IDM_SORT_MOD_DATE :
 		(m_pFileList->GetSorting() == Helpers::FS_CreationTime) ? IDM_SORT_CREATION_DATE :
 		(m_pFileList->GetSorting() == Helpers::FS_FileName) ? IDM_SORT_NAME :
@@ -1476,6 +1522,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 		case IDM_SORT_NAME:
 		case IDM_SORT_RANDOM:
 		case IDM_SORT_SIZE:
+			CancelExplorerOrder();
 			m_pFileList->SetSorting(
 				(nCommand == IDM_SORT_CREATION_DATE) ? Helpers::FS_CreationTime : 
 				(nCommand == IDM_SORT_MOD_DATE) ? Helpers::FS_LastModTime : 
@@ -1487,6 +1534,7 @@ void CMainDlg::ExecuteCommand(int nCommand) {
 			break;
 		case IDM_SORT_ASCENDING:
 		case IDM_SORT_DESCENDING:
+			CancelExplorerOrder();
 			m_pFileList->SetSorting(m_pFileList->GetSorting(), nCommand == IDM_SORT_ASCENDING);
 			if (m_pEXIFDisplayCtl->IsActive() || m_bShowFileName) {
 				this->Invalidate(FALSE);
@@ -2147,6 +2195,7 @@ bool CMainDlg::OpenFileWithDialog(bool bFullScreen, bool bAfterStartup) {
 }
 
 void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
+	CancelExplorerOrder();
 	StopMovieMode();
 	StopAnimation();
 	// recreate file list based on image opened
@@ -2155,6 +2204,8 @@ void CMainDlg::OpenFile(LPCTSTR sFileName, bool bAfterStartup) {
 	delete m_pFileList;
 	m_sStartupFile = sFileName;
 	m_pFileList = new CFileList(m_sStartupFile, *m_pDirectoryWatcher, eOldSorting, oOldAscending, CSettingsProvider::This().WrapAroundFolder());
+	BeginExplorerOrder(m_sStartupFile, m_hSourceExplorer);
+	m_hSourceExplorer = NULL;
 	// free current image and all read ahead images
 	InitParametersForNewImage();
 	m_pJPEGProvider->NotifyNotUsed(m_pCurrentImage);
@@ -2409,6 +2460,10 @@ void CMainDlg::GotoImage(EImagePosition ePos) {
 }
 
 void CMainDlg::GotoImage(EImagePosition ePos, int nFlags) {
+	// An early key press must not navigate using the temporary fallback order.
+	// No wait/pumping loop: the UI and first image remain responsive.
+	if (ePos != POS_Current && ePos != POS_Clipboard && ePos != POS_NextAnimation &&
+		!PollExplorerOrder()) return;
 	// Timer handling for slideshows
 	if (ePos == POS_Next || ePos == POS_NextSlideShow) {
 		if (m_nCurrentTimeout > 0) {
@@ -3462,6 +3517,7 @@ void CMainDlg::AnimateTransition() {
 }
 
 void CMainDlg::CleanupAndTerminate() {
+	CancelExplorerOrder();
 	StopMovieMode();
 	StopAnimation();
 	delete m_pJPEGProvider; // delete this early to properly shut down the loading threads
